@@ -127,6 +127,11 @@
       const [studentsData, setStudentsData] = useState(INITIAL_STUDENTS);
       const [isLoadingData, setIsLoadingData] = useState(false);
 
+      // 👉 TOMBOL AKTIF & NON-AKTIF AKSES SISTEM (Disimpan di localStorage)
+      const [isSystemActive, setIsSystemActive] = useState(() => {
+        return localStorage.getItem('isSystemActive') === 'true';
+      });
+
       // --- MODAL STATES ---
       const [editingStudent, setEditingStudent] = useState(null);
       const [deletingStudent, setDeletingStudent] = useState(null);
@@ -136,6 +141,11 @@
       const audioRef = useRef(null);
       const fileInputRef = useRef(null);
       const hasAutoSearched = useRef(false);
+
+      // 👉 PERSISTENSI STATUS SISTEM AKTIF/NON-AKTIF
+      useEffect(() => {
+        localStorage.setItem('isSystemActive', isSystemActive);
+      }, [isSystemActive]);
 
       // 👉 FETCH DATA AWAL
       useEffect(() => {
@@ -163,7 +173,7 @@
         }
       }, []);
 
-      // 👉 AUTO-SEARCH DARI QR DENGAN CHECK STATUS WAKTU countdown
+      // 👉 AUTO-SEARCH DARI QR DENGAN CHECK STATUS WAKTU & STATUS SAKELAR SISTEM
       useEffect(() => {
         if (hasAutoSearched.current || isLoadingData || studentsData.length === 0) return;
         const params = new URLSearchParams(window.location.search);
@@ -171,9 +181,11 @@
         if (nisnParam) {
           hasAutoSearched.current = true;
           
-          // Cek waktu rilis pengumuman, kecuali untuk NISN '12345'
+          // Sistem dianggap rilis apabila waktu sudah lewat atau admin menyalakan sakelar "Aktif"
           const now = new Date().getTime();
-          if (now < ANNOUNCEMENT_DATE && nisnParam !== '12345') {
+          const isReleased = now >= ANNOUNCEMENT_DATE || isSystemActive;
+
+          if (!isReleased && nisnParam !== '12345') {
             showToast('Pengumuman Belum Dimulai!', 'error');
             setCurrentPath('cek');
             return;
@@ -187,7 +199,7 @@
             setSearchResult(result || 'not_found');
           }, 800);
         }
-      }, [studentsData, isLoadingData]);
+      }, [studentsData, isLoadingData, isSystemActive]);
 
       useEffect(() => {
         if (isDarkMode) document.documentElement.classList.add('dark');
@@ -240,14 +252,16 @@
         setMusicPlaying(!musicPlaying);
       };
 
-      // 👉 VALIDASI WAKTU PENGUMUMAN & BYPASS "12345" SAAT SUBMIT CARI
+      // 👉 VALIDASI WAKTU PENGUMUMAN & BYPASS SAKELAR AKTIF & BYPASS "12345"
       const handleSearch = (e) => {
         e.preventDefault();
         if (!searchQuery.trim()) return showToast('Masukkan NISN', 'error');
 
         const now = new Date().getTime();
-        // Proteksi countdown waktu rilis, bypass jika NISN adalah '12345'
-        if (now < ANNOUNCEMENT_DATE && searchQuery !== '12345') {
+        const isReleased = now >= ANNOUNCEMENT_DATE || isSystemActive;
+
+        // Proteksi countdown waktu rilis, bypass jika sakelar Aktif ATAU NISN adalah '12345'
+        if (!isReleased && searchQuery !== '12345') {
           showToast('Pengumuman Belum Dimulai!', 'error');
           setSearchResult('not_started');
           return;
@@ -364,7 +378,7 @@
           return () => clearInterval(timer);
         }, []);
 
-        if (isFinished) {
+        if (isFinished || isSystemActive) {
           return (
             <div className="my-10 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-6 py-3 rounded-2xl animate-pulse font-black uppercase text-sm tracking-widest no-print">
               🎉 PENGUMUMAN SUDAH DIMULAI & DAPAT DIAKSES 🎉
@@ -500,7 +514,7 @@
         }
         return (
           <div className="p-4 md:p-8 dark:bg-slate-900 bg-slate-50 min-h-[calc(100vh-80px)]">
-            <div className="max-w-7xl mx-auto">
+            <div className="max-w-7xl mx-auto animate-fade-in-up">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                   <h2 className="text-2xl font-black dark:text-white uppercase tracking-tighter">Database Siswa</h2>
@@ -509,6 +523,39 @@
                 <div className="flex flex-wrap gap-2">
                   <button onClick={() => setIsAdminLoggedIn(false)} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-[10px] font-bold flex items-center hover:bg-red-100 uppercase tracking-widest transition-all"><LogOutIcon size={14} className="mr-2"/> Keluar</button>
                 </div>
+              </div>
+
+              {/* 👉 KONTROL AKTIF / NON-AKTIF AKSES SISTEM PENGUMUMAN */}
+              <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="max-w-xl">
+                  <h3 className="font-bold dark:text-white text-lg uppercase tracking-tight flex items-center">
+                    ⚙️ Kontrol Status Pengumuman
+                  </h3>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+                    {isSystemActive 
+                      ? "🟢 SISTEM AKTIF: Semua data NISN siswa sudah dapat dicari dan dicek kelulusannya oleh pengguna umum secara langsung." 
+                      : "🔴 SISTEM NON-AKTIF: Sistem terkunci. Hanya NISN uji coba '12345' yang diperbolehkan bypass pengecekan sebelum tanggal rilis resmi."}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    const nextState = !isSystemActive;
+                    setIsSystemActive(nextState);
+                    showToast(
+                      nextState 
+                        ? 'Sistem diaktifkan: Semua NISN dapat dicari sekarang' 
+                        : 'Sistem dinonaktifkan: Hanya NISN 12345 yang aktif', 
+                      'success'
+                    );
+                  }}
+                  className={`w-full sm:w-auto px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${
+                    isSystemActive 
+                      ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/30' 
+                      : 'bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-400 dark:hover:bg-slate-600'
+                  }`}
+                >
+                  {isSystemActive ? '🟢 AKTIF (SEMUA BISA CEK)' : '🔴 NON-AKTIF (HANYA 12345)'}
+                </button>
               </div>
 
               <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl overflow-hidden border border-slate-100 dark:border-slate-700">
